@@ -32,7 +32,8 @@ const state = {
   theme: 'dark-theme',
   isSharingLocation: false,
   watchId: null,
-  activeVolunteers: {}
+  activeVolunteers: {},
+  sessionId: 'sess-' + Math.random().toString(36).substr(2, 9)
 };
 
 // Initial Mock Heroes
@@ -167,10 +168,11 @@ document.addEventListener('DOMContentLoaded', () => {
   // Attach event listeners
   setupEventListeners();
 
-  // Initialize Firebase real-time listeners if connected
-  if (db) {
-    initFirebaseSync();
-  }
+  // Set initial login/logout UI state
+  updateAuthUI();
+
+  // Initialize MQTT real-time synchronization
+  initMqttSync();
   
   // Setup real-time simulation bot
   startVolunteerBotInterval();
@@ -216,12 +218,12 @@ function initLocalStorageData() {
     localStorage.setItem('pawrescue_private_chats', JSON.stringify(state.privateChats));
   }
 
-  // Load isLoggedIn state (default true as guest)
+  // Load isLoggedIn state (default false to prompt login page)
   const storedLoggedInStatus = localStorage.getItem('pawrescue_logged_in');
   if (storedLoggedInStatus !== null) {
     state.isLoggedIn = storedLoggedInStatus === 'true';
   } else {
-    state.isLoggedIn = true;
+    state.isLoggedIn = false;
   }
 
   // Load donation totals
@@ -805,6 +807,14 @@ function setupEventListeners() {
     state.currentChatPartner = null;
   });
   document.getElementById('private-send-form').addEventListener('submit', handlePrivateChatSubmit);
+
+  // Full-screen Auth Page Event Listeners
+  document.getElementById('page-auth-tab-signin').addEventListener('click', () => togglePageAuthTabs('signin'));
+  document.getElementById('page-auth-tab-signup').addEventListener('click', () => togglePageAuthTabs('signup'));
+  
+  document.getElementById('page-signin-form').addEventListener('submit', handlePageSignInSubmit);
+  document.getElementById('page-signup-form').addEventListener('submit', handlePageSignUpSubmit);
+  document.getElementById('page-quick-guest-login-btn').addEventListener('click', handlePageQuickGuestLogin);
 
   // Theme Toggle Button
   document.getElementById('theme-toggle-btn').addEventListener('click', toggleThemeMode);
@@ -2231,7 +2241,8 @@ function handleProfileLogout() {
   document.getElementById('header-username').innerText = 'Guest';
   document.getElementById('header-avatar').src = `https://api.dicebear.com/7.x/bottts/svg?seed=Guest`;
 
-  openProfileModal();
+  closeProfileModal();
+  updateAuthUI();
 }
 
 function handleProfileSave() {
@@ -2309,150 +2320,296 @@ function resetDonationSectionToDashboard() {
 }
 
 // ----------------------------------------------------
-// Firebase Sync Declarations & Helpers
+// MQTT Global Real-time Sync & fallbacks
 // ----------------------------------------------------
-let db = null;
-const firebaseConfig = {
-  databaseURL: "https://pawrescue-hub-default-rtdb.firebaseio.com"
-};
+const MQTT_BROKER = "wss://broker.emqx.io:8084/mqtt";
+const MQTT_TOPIC_SIGHTINGS = "pawrescue/hub/sightings/dil123";
+const MQTT_TOPIC_CHATS = "pawrescue/hub/chats/dil123";
+const MQTT_TOPIC_HEROES = "pawrescue/hub/heroes/dil123";
+const MQTT_TOPIC_PRIVATE = "pawrescue/hub/private/dil123";
 
-if (typeof firebase !== 'undefined') {
+let mqttClient = null;
+
+function initMqttSync() {
+  if (typeof mqtt === 'undefined') {
+    console.warn("MQTT library not found. Falling back to local tab sync.");
+    return;
+  }
+
   try {
-    firebase.initializeApp(firebaseConfig);
-    db = firebase.database();
-    console.log("Firebase connected successfully!");
-  } catch (err) {
-    console.error("Firebase init failed:", err);
-  }
-}
-
-function initFirebaseSync() {
-  if (!db) return;
-
-  // 1. Sync Sightings
-  db.ref('sightings').on('value', (snapshot) => {
-    const data = snapshot.val();
-    if (data) {
-      const list = Object.keys(data).map(key => data[key]);
-      state.sightings = list;
-      
-      state.sightings.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
-      
-      renderSightingGrid();
-      refreshMapMarkers();
-      updateDashboardStats();
-      
-      if (state.currentDetailId) {
-        const sig = state.sightings.find(s => s.id === state.currentDetailId);
-        if (sig) {
-          renderDetailComments(sig.comments);
-          renderNearestVolunteers(sig);
+    mqttClient = mqtt.connect(MQTT_BROKER);
+    
+    mqttClient.on('connect', () => {
+      console.log("Connected to EMQX public MQTT broker successfully!");
+      mqttClient.subscribe(MQTT_TOPIC_SIGHTINGS);
+      mqttClient.subscribe(MQTT_TOPIC_CHATS);
+      mqttClient.subscribe(MQTT_TOPIC_HEROES);
+      mqttClient.subscribe(MQTT_TOPIC_PRIVATE);
+    });
+    
+    mqttClient.on('message', (topic, message) => {
+      try {
+        const data = JSON.parse(message.toString());
+        
+        // Skip messages published by this session to prevent echo loops
+        if (data.senderSessionId === state.sessionId) return;
+        
+        if (topic === MQTT_TOPIC_SIGHTINGS) {
+          handleMqttSightingUpdate(data);
+        } else if (topic === MQTT_TOPIC_CHATS) {
+          handleMqttChatUpdate(data);
+        } else if (topic === MQTT_TOPIC_HEROES) {
+          handleMqttHeroesUpdate(data);
+        } else if (topic === MQTT_TOPIC_PRIVATE) {
+          handleMqttPrivateUpdate(data);
         }
+      } catch (err) {
+        console.error("MQTT parsing error:", err);
       }
-    }
-  });
-
-  // 2. Sync Chat Feed
-  db.ref('chats').limitToLast(50).on('child_added', (snapshot) => {
-    const msg = snapshot.val();
-    if (msg && msg.id) {
-      if (!state.chats.some(c => c.id === msg.id)) {
-        state.chats.push(msg);
-        renderChatMessages();
-      }
-    }
-  });
-
-  // 3. Sync Heroes Scoreboard
-  db.ref('heroes').on('value', (snapshot) => {
-    const data = snapshot.val();
-    if (data) {
-      state.heroes = data;
-      renderRescueHeroes();
-    }
-  });
-}
-
-function saveSightingToDB(sighting, isNew = false) {
-  if (db) {
-    db.ref('sightings/' + sighting.id).set(sighting);
-  } else {
-    if (isNew) {
-      state.sightings.unshift(sighting);
-    } else {
-      const idx = state.sightings.findIndex(s => s.id === sighting.id);
-      if (idx !== -1) state.sightings[idx] = sighting;
-    }
-    localStorage.setItem('pawrescue_sightings', JSON.stringify(state.sightings));
-    
-    renderSightingGrid();
-    refreshMapMarkers();
-    updateDashboardStats();
-    
-    if (state.currentDetailId === sighting.id) {
-      renderDetailComments(sighting.comments);
-      renderNearestVolunteers(sighting);
-    }
-    
-    sightingChannel.postMessage({ type: 'SIGHTING_UPDATE', sighting: sighting });
+    });
+  } catch (err) {
+    console.error("MQTT initialization failed:", err);
   }
 }
 
-function saveChatMessageToDB(msg) {
-  if (db) {
-    db.ref('chats').push(msg);
+function publishMqtt(topic, payload) {
+  if (mqttClient && mqttClient.connected) {
+    payload.senderSessionId = state.sessionId;
+    mqttClient.publish(topic, JSON.stringify(payload));
+  }
+}
+
+function handleMqttSightingUpdate(data) {
+  const sighting = data.sighting;
+  const isNew = data.isNew;
+  
+  if (isNew) {
+    if (!state.sightings.some(s => s.id === sighting.id)) {
+      state.sightings.unshift(sighting);
+    }
   } else {
+    const idx = state.sightings.findIndex(s => s.id === sighting.id);
+    if (idx !== -1) {
+      state.sightings[idx] = sighting;
+    }
+  }
+  
+  localStorage.setItem('pawrescue_sightings', JSON.stringify(state.sightings));
+  renderSightingGrid();
+  refreshMapMarkers();
+  updateDashboardStats();
+  
+  if (state.currentDetailId === sighting.id) {
+    renderDetailComments(sighting.comments);
+    renderNearestVolunteers(sighting);
+  }
+}
+
+function handleMqttChatUpdate(data) {
+  const msg = data.msg;
+  if (msg && !state.chats.some(c => c.id === msg.id)) {
     state.chats.push(msg);
     localStorage.setItem('pawrescue_chats', JSON.stringify(state.chats));
     renderChatMessages();
-    chatChannel.postMessage({ type: 'CHAT_MSG', data: msg });
   }
+}
+
+function handleMqttHeroesUpdate(data) {
+  state.heroes = data.heroes;
+  localStorage.setItem('pawrescue_heroes', JSON.stringify(state.heroes));
+  renderRescueHeroes();
+}
+
+function handleMqttPrivateUpdate(data) {
+  const msg = data.msg;
+  if (!msg) return;
+
+  // Filter messages meant for us
+  if (msg.recipient !== state.currentUser.username && msg.sender !== state.currentUser.username) return;
+
+  const partner = msg.sender === state.currentUser.username ? msg.recipient : msg.sender;
+
+  if (!state.privateChats[partner]) {
+    state.privateChats[partner] = [];
+  }
+  if (!state.privateChats[partner].some(m => m.id === msg.id)) {
+    state.privateChats[partner].push(msg);
+    localStorage.setItem('pawrescue_private_chats', JSON.stringify(state.privateChats));
+    
+    if (state.currentChatPartner === partner) {
+      renderPrivateMessages();
+    }
+  }
+}
+
+function saveSightingToDB(sighting, isNew = false) {
+  if (isNew) {
+    state.sightings.unshift(sighting);
+  } else {
+    const idx = state.sightings.findIndex(s => s.id === sighting.id);
+    if (idx !== -1) state.sightings[idx] = sighting;
+  }
+  
+  localStorage.setItem('pawrescue_sightings', JSON.stringify(state.sightings));
+  renderSightingGrid();
+  refreshMapMarkers();
+  updateDashboardStats();
+  
+  if (state.currentDetailId === sighting.id) {
+    renderDetailComments(sighting.comments);
+    renderNearestVolunteers(sighting);
+  }
+  
+  sightingChannel.postMessage({ type: 'SIGHTING_UPDATE', sighting: sighting });
+  publishMqtt(MQTT_TOPIC_SIGHTINGS, { sighting, isNew });
+}
+
+function saveChatMessageToDB(msg) {
+  state.chats.push(msg);
+  if (state.chats.length > 100) state.chats.shift();
+  
+  localStorage.setItem('pawrescue_chats', JSON.stringify(state.chats));
+  renderChatMessages();
+  
+  chatChannel.postMessage({ type: 'CHAT_MSG', data: msg });
+  publishMqtt(MQTT_TOPIC_CHATS, { msg });
 }
 
 function saveHeroesToDB(heroesList) {
-  if (db) {
-    db.ref('heroes').set(heroesList);
-  } else {
-    localStorage.setItem('pawrescue_heroes', JSON.stringify(state.heroes));
-    renderRescueHeroes();
-    chatChannel.postMessage({ type: 'HEROES_UPDATE', data: state.heroes });
-  }
+  state.heroes = heroesList;
+  localStorage.setItem('pawrescue_heroes', JSON.stringify(state.heroes));
+  renderRescueHeroes();
+  
+  chatChannel.postMessage({ type: 'HEROES_UPDATE', data: state.heroes });
+  publishMqtt(MQTT_TOPIC_HEROES, { heroes: heroesList });
 }
 
 function savePrivateMessageToDB(msg, partner) {
-  if (db) {
-    const convId = [state.currentUser.username, partner].sort().join('_');
-    db.ref('privateChats/' + convId).push(msg);
-  } else {
-    if (!state.privateChats[partner]) {
-      state.privateChats[partner] = [];
-    }
-    state.privateChats[partner].push(msg);
-    localStorage.setItem('pawrescue_private_chats', JSON.stringify(state.privateChats));
-    renderPrivateMessages();
-    chatChannel.postMessage({ type: 'PRIVATE_MSG', data: msg });
+  if (!state.privateChats[partner]) {
+    state.privateChats[partner] = [];
   }
+  state.privateChats[partner].push(msg);
+  localStorage.setItem('pawrescue_private_chats', JSON.stringify(state.privateChats));
+  renderPrivateMessages();
+  
+  chatChannel.postMessage({ type: 'PRIVATE_MSG', data: msg });
+  publishMqtt(MQTT_TOPIC_PRIVATE, { msg });
 }
 
 function listenToPrivateMessages(partner) {
-  if (!db || !partner) return;
-  const convId = [state.currentUser.username, partner].sort().join('_');
+  // MQTT subscriptions handle this globally and filter on the fly.
+}
+
+// ----------------------------------------------------
+// Full-screen Auth Page Controllers
+// ----------------------------------------------------
+function updateAuthUI() {
+  const authPage = document.getElementById('auth-page');
+  const appLayout = document.querySelector('.app-layout');
   
-  db.ref('privateChats/' + convId).off();
-  db.ref('privateChats/' + convId).on('child_added', (snapshot) => {
-    const msg = snapshot.val();
-    if (msg && msg.id) {
-      if (!state.privateChats[partner]) {
-        state.privateChats[partner] = [];
+  if (state.isLoggedIn) {
+    authPage.classList.add('hidden');
+    appLayout.classList.remove('hidden');
+    setTimeout(() => {
+      if (state.map.main) {
+        state.map.main.invalidateSize();
       }
-      if (!state.privateChats[partner].some(m => m.id === msg.id)) {
-        state.privateChats[partner].push(msg);
-        if (state.currentChatPartner === partner) {
-          renderPrivateMessages();
-        }
-      }
-    }
-  });
+    }, 200);
+  } else {
+    authPage.classList.remove('hidden');
+    appLayout.classList.add('hidden');
+  }
+}
+
+function togglePageAuthTabs(tabType) {
+  const signinBtn = document.getElementById('page-auth-tab-signin');
+  const signupBtn = document.getElementById('page-auth-tab-signup');
+  const signinForm = document.getElementById('page-signin-form');
+  const signupForm = document.getElementById('page-signup-form');
+  const formTitle = document.getElementById('auth-form-title');
+  const formSubtitle = formTitle.nextElementSibling;
+
+  if (tabType === 'signin') {
+    signinBtn.classList.add('active');
+    signinBtn.style.color = "var(--color-primary)";
+    signupBtn.classList.remove('active');
+    signupBtn.style.color = "var(--text-muted)";
+    signinForm.classList.remove('hidden');
+    signupForm.classList.add('hidden');
+    formTitle.innerText = "Welcome to PawRescue";
+    formSubtitle.innerText = "Please sign in to coordinate rescues.";
+  } else {
+    signinBtn.classList.remove('active');
+    signinBtn.style.color = "var(--text-muted)";
+    signupBtn.classList.add('active');
+    signupBtn.style.color = "var(--color-primary)";
+    signinForm.classList.add('hidden');
+    signupForm.classList.remove('hidden');
+    formTitle.innerText = "Join the Network";
+    formSubtitle.innerText = "Register to start mapping & rescuing strays.";
+  }
+}
+
+function handlePageSignInSubmit(e) {
+  e.preventDefault();
+  const email = document.getElementById('page-signin-email').value;
+  const nickname = email.split('@')[0];
+  
+  state.currentUser = {
+    username: nickname,
+    avatarSeed: 'RescueHero'
+  };
+  state.isLoggedIn = true;
+  localStorage.setItem('pawrescue_logged_in', 'true');
+  localStorage.setItem('pawrescue_user', JSON.stringify(state.currentUser));
+
+  // Sync header
+  document.getElementById('header-username').innerText = nickname;
+  document.getElementById('header-avatar').src = `https://api.dicebear.com/7.x/bottts/svg?seed=${state.currentUser.avatarSeed}`;
+
+  sendPublicChatSystemMsg(`🔑 User Alert: ${nickname} logged in.`);
+  
+  updateAuthUI();
+  e.target.reset();
+}
+
+function handlePageSignUpSubmit(e) {
+  e.preventDefault();
+  const nickname = document.getElementById('page-signup-nickname').value.trim();
+  
+  state.currentUser = {
+    username: nickname,
+    avatarSeed: 'RescueHero'
+  };
+  state.isLoggedIn = true;
+  localStorage.setItem('pawrescue_logged_in', 'true');
+  localStorage.setItem('pawrescue_user', JSON.stringify(state.currentUser));
+
+  // Sync header
+  document.getElementById('header-username').innerText = nickname;
+  document.getElementById('header-avatar').src = `https://api.dicebear.com/7.x/bottts/svg?seed=${state.currentUser.avatarSeed}`;
+
+  sendPublicChatSystemMsg(`🎉 Community Welcome: Volunteer "${nickname}" registered!`);
+  
+  updateAuthUI();
+  e.target.reset();
+}
+
+function handlePageQuickGuestLogin() {
+  state.currentUser = {
+    username: 'GuestRescuer',
+    avatarSeed: 'RescueHero'
+  };
+  state.isLoggedIn = true;
+  localStorage.setItem('pawrescue_logged_in', 'true');
+  localStorage.setItem('pawrescue_user', JSON.stringify(state.currentUser));
+
+  document.getElementById('header-username').innerText = 'GuestRescuer';
+  document.getElementById('header-avatar').src = `https://api.dicebear.com/7.x/bottts/svg?seed=RescueHero`;
+
+  sendPublicChatSystemMsg(`🔑 User Alert: GuestRescuer entered.`);
+  
+  updateAuthUI();
 }
 
 
