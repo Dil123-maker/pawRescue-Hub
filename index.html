@@ -1,0 +1,732 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>PawRescue Hub | Report & Rescue Abandoned Pets</title>
+  <meta name="description" content="A real-time community hub to report and track abandoned roadside kittens and puppies. Pin locations, upload photos, and coordinate rescues in live chat.">
+  
+  <!-- Leaflet Map CSS -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="" />
+  
+  <!-- Google Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=Plus+Jakarta+Sans:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  
+  <!-- FontAwesome Icons -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" integrity="sha512-iecdLmaskl7CVkqkXNQ/ZH/XLlvWZOJyj7Yy7tcenmpD1ypASozpmT/E0iPtmFIB46ZmdtAc9eNBvH0H/ZpiBw==" crossorigin="anonymous" referrerpolicy="no-referrer" />
+  
+  <!-- Local Stylesheet -->
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body class="dark-theme">
+  <!-- App Container -->
+  <div class="app-layout">
+    
+    <!-- Top Navigation Bar -->
+    <header class="app-header">
+      <div class="header-logo">
+        <div class="logo-icon">
+          <i class="fa-solid fa-paw animate-bounce-slow"></i>
+        </div>
+        <div class="logo-text">
+          <h1>PawRescue<span>Hub</span></h1>
+          <p>Roadside Stray Alert & Coordination</p>
+        </div>
+      </div>
+      
+      <!-- Top Navigation Tabs Menu -->
+      <nav class="header-nav">
+        <button class="nav-tab active" data-tab="dashboard"><i class="fa-solid fa-chart-line"></i> Dashboard</button>
+        <button class="nav-tab" data-tab="help"><i class="fa-solid fa-circle-question"></i> How to Help</button>
+        <button class="nav-tab" data-tab="donate"><i class="fa-solid fa-hand-holding-heart"></i> Donate</button>
+      </nav>
+      
+      <div class="header-actions">
+        <div class="volunteer-counter" id="online-volunteers-badge">
+          <span class="pulse-indicator"></span>
+          <span id="active-volunteers-text">12 Volunteers Online</span>
+        </div>
+        <button id="theme-toggle-btn" class="icon-btn" title="Toggle Theme">
+          <i class="fa-solid fa-sun"></i>
+        </button>
+        <button id="live-location-btn" class="btn btn-outline" title="Share Live GPS Location" style="border-color: var(--color-rescued); color: var(--color-rescued);">
+          <i class="fa-solid fa-location-crosshairs"></i>
+          <span>Share Live GPS</span>
+        </button>
+        <button id="report-trigger-btn" class="btn btn-primary animate-pulse-slow">
+          <i class="fa-solid fa-triangle-exclamation"></i>
+          Report Stray
+        </button>
+      </div>
+    </header>
+
+    <!-- Main Grid Workspace -->
+    <main class="app-workspace">
+      
+      <!-- Left Column: Map & Sighting Feed -->
+      <section class="workspace-main">
+        
+        <!-- Dashboard Stat Cards -->
+        <div class="stats-row">
+          <div class="stat-card urgent">
+            <div class="stat-icon"><i class="fa-solid fa-kit-medical"></i></div>
+            <div class="stat-info">
+              <span class="stat-value" id="stat-urgent">0</span>
+              <span class="stat-label">Urgent Alerts</span>
+            </div>
+          </div>
+          <div class="stat-card active-reports">
+            <div class="stat-icon"><i class="fa-solid fa-location-dot"></i></div>
+            <div class="stat-info">
+              <span class="stat-value" id="stat-active">0</span>
+              <span class="stat-label">Active Sightings</span>
+            </div>
+          </div>
+          <div class="stat-card rescued">
+            <div class="stat-icon"><i class="fa-solid fa-circle-check"></i></div>
+            <div class="stat-info">
+              <span class="stat-value" id="stat-rescued">0</span>
+              <span class="stat-label">Rescued & Safe</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Interactive Map Section -->
+        <div class="map-container-box glass-panel">
+          <div class="panel-header">
+            <h3><i class="fa-solid fa-map-location-dot"></i> Live Sighting Map</h3>
+            <span class="panel-subtitle">Click map to get coordinates or click markers for details</span>
+          </div>
+          <div id="rescue-map" class="map-view"></div>
+        </div>
+
+        <!-- Sighting Feed Toolbar & Filter -->
+        <div class="feed-header">
+          <div class="feed-title">
+            <h2>Active Sightings Feed</h2>
+            <p id="sighting-count">Showing 0 reports</p>
+          </div>
+          
+          <div class="feed-filters">
+            <div class="search-box">
+              <i class="fa-solid fa-magnifying-glass"></i>
+              <input type="text" id="search-input" placeholder="Search locations...">
+            </div>
+            
+            <div class="filter-buttons">
+              <button class="filter-btn active" data-filter="all">All</button>
+              <button class="filter-btn" data-filter="kitten"><i class="fa-solid fa-cat"></i> Kittens</button>
+              <button class="filter-btn" data-filter="puppy"><i class="fa-solid fa-dog"></i> Puppies</button>
+              <button class="filter-btn" data-filter="urgent"><i class="fa-solid fa-triangle-exclamation"></i> Urgent</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Sighting Grid -->
+        <div class="sighting-grid" id="sighting-grid-container">
+          <!-- Sighting cards dynamically injected here -->
+          <div class="empty-state" id="feed-empty-state">
+            <div class="empty-icon"><i class="fa-solid fa-heart-pulse"></i></div>
+            <h3>No Active Sightings</h3>
+            <p>Great news! No abandoned puppies or kittens have been reported in this area recently. Be the first to report if you spot a stray roadside pet.</p>
+            <button class="btn btn-secondary" id="empty-state-report-btn">Report Sighting</button>
+          </div>
+        </div>
+      </section>
+
+      <!-- Right Column: PawTalk Live Chat -->
+      <aside class="workspace-sidebar glass-panel">
+        <div class="sidebar-header">
+          <div class="chat-title">
+            <h3><i class="fa-solid fa-comments"></i> PawTalk Live Chat</h3>
+            <span class="chat-status"><span class="online-indicator"></span>Public Live Feed</span>
+          </div>
+          
+          <!-- User Profile Settings Toggle -->
+          <button id="profile-edit-btn" class="icon-btn-text" title="Edit Profile">
+            <span id="header-username">Guest Volunteer</span>
+            <img id="header-avatar" src="https://api.dicebear.com/7.x/bottts/svg?seed=Guest" alt="User Avatar" class="avatar-sm">
+          </button>
+        </div>
+
+        <!-- User Profile Customizer (Collapsible) -->
+        <div id="profile-customizer" class="profile-panel hidden">
+          <h4>Customize Your Profile</h4>
+          <div class="profile-form">
+            <div class="input-group">
+              <label for="username-input">Nickname</label>
+              <input type="text" id="username-input" placeholder="Volunteer Nickname" value="Guest Volunteer">
+            </div>
+            <div class="avatar-selector">
+              <label>Select Avatar Style</label>
+              <div class="avatar-options">
+                <img class="avatar-option active" data-seed="RescueHero" src="https://api.dicebear.com/7.x/bottts/svg?seed=RescueHero" alt="Avatar">
+                <img class="avatar-option" data-seed="PawsLover" src="https://api.dicebear.com/7.x/bottts/svg?seed=PawsLover" alt="Avatar">
+                <img class="avatar-option" data-seed="CatSaver" src="https://api.dicebear.com/7.x/bottts/svg?seed=CatSaver" alt="Avatar">
+                <img class="avatar-option" data-seed="DogWalker" src="https://api.dicebear.com/7.x/bottts/svg?seed=DogWalker" alt="Avatar">
+                <img class="avatar-option" data-seed="StreetAngel" src="https://api.dicebear.com/7.x/bottts/svg?seed=StreetAngel" alt="Avatar">
+              </div>
+            </div>
+            <div class="profile-actions">
+              <button type="button" id="save-profile-btn" class="btn btn-sm btn-primary">Save Profile</button>
+              <button type="button" id="cancel-profile-btn" class="btn btn-sm btn-outline">Cancel</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Rescue Heroes Showcase -->
+        <div class="heroes-showcase" id="heroes-showcase-panel">
+          <div class="heroes-header">
+            <h4><i class="fa-solid fa-crown" style="color: gold;"></i> Rescue Heroes</h4>
+            <span class="heroes-subtitle">Local Champions</span>
+          </div>
+          <div class="heroes-list" id="heroes-list-container">
+            <!-- Dynamic hero avatars show here -->
+          </div>
+        </div>
+
+        <!-- Chat messages view -->
+        <div class="chat-messages-container" id="chat-messages-box">
+          <!-- Messages dynamically injected here -->
+        </div>
+
+        <!-- Message input bar -->
+        <form class="chat-input-bar" id="chat-send-form">
+          <input type="text" id="chat-input" placeholder="Type a message to coordinate rescue..." autocomplete="off" required>
+          <button type="submit" class="chat-send-btn" title="Send Message">
+            <i class="fa-solid fa-paper-plane"></i>
+          </button>
+        </form>
+      </aside>
+    </main>
+     </main>
+
+    <!-- Help & Resource Section (Hidden by default) -->
+    <section class="app-workspace help-workspace-panel hidden" id="help-section">
+      <div class="glass-panel help-content-card w-full" style="padding: 2rem;">
+        <div class="panel-header" style="padding-left: 0; padding-top: 0; margin-bottom: 1.5rem;">
+          <h2><i class="fa-solid fa-circle-question" style="color: var(--color-primary);"></i> How to Help Abandoned Roadside Pets</h2>
+          <p class="panel-subtitle" style="font-size: 0.85rem;">Essential guidelines for safely catching, treating, and fostering stray kittens and puppies.</p>
+        </div>
+        
+        <div class="help-grid" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 1.5rem; margin-bottom: 2rem;">
+          <div class="help-card glass-panel" style="padding: 1.25rem; background-color: var(--bg-primary);">
+            <h3 style="color: var(--color-urgent); margin-bottom: 0.5rem;"><i class="fa-solid fa-triangle-exclamation"></i> 1. Safety First</h3>
+            <ul style="margin-left: 1.2rem; font-size: 0.85rem; display: flex; flex-direction: column; gap: 0.4rem; color: var(--text-main);">
+              <li><strong>Do not chase:</strong> A frightened animal will run into traffic. Approach slowly, crouch down, and speak in calm, soft tones.</li>
+              <li><strong>Lure with food:</strong> Use wet food, canned tuna, or dry kibble to coax the animal toward you rather than grabbing them.</li>
+              <li><strong>Protect yourself:</strong> Wear thick gloves if possible. Strays might bite or scratch out of fear.</li>
+            </ul>
+          </div>
+          
+          <div class="help-card glass-panel" style="padding: 1.25rem; background-color: var(--bg-primary);">
+            <h3 style="color: var(--color-secondary); margin-bottom: 0.5rem;"><i class="fa-solid fa-kit-medical"></i> 2. First Aid & Transport</h3>
+            <ul style="margin-left: 1.2rem; font-size: 0.85rem; display: flex; flex-direction: column; gap: 0.4rem; color: var(--text-main);">
+              <li><strong>Secure holding:</strong> Place strays in a well-ventilated cardboard box or pet carrier lined with towels.</li>
+              <li><strong>Keep them warm:</strong> Stranded puppies and kittens (especially under 6 weeks) cannot regulate their temperature. Keep them wrapped up.</li>
+              <li><strong>Offer water immediately:</strong> Roadside strays are almost always severely dehydrated. Offer water but avoid cow's milk.</li>
+            </ul>
+          </div>
+
+          <div class="help-card glass-panel" style="padding: 1.25rem; background-color: var(--bg-primary);">
+            <h3 style="color: var(--color-rescued); margin-bottom: 0.5rem;"><i class="fa-solid fa-home"></i> 3. Fostering & Feeding</h3>
+            <ul style="margin-left: 1.2rem; font-size: 0.85rem; display: flex; flex-direction: column; gap: 0.4rem; color: var(--text-main);">
+              <li><strong>Isolation:</strong> Keep rescued strays isolated from your own pets for at least 7 days to prevent disease transmission.</li>
+              <li><strong>Kitten Feeding:</strong> Young kittens need warm specialized kitten formula (KMR). Do not feed them solid food if their eyes are closed.</li>
+              <li><strong>Vet Check:</strong> Take them to a vet clinic as soon as possible for deworming, vaccines, and a flea treatment.</li>
+            </ul>
+          </div>
+        </div>
+
+        <div class="emergency-contacts glass-panel" style="padding: 1.25rem; border-color: var(--color-primary); background: linear-gradient(135deg, rgba(245, 158, 11, 0.05), rgba(59, 130, 246, 0.05));">
+          <h3 style="color: var(--color-primary); margin-bottom: 0.5rem;"><i class="fa-solid fa-phone-flip animate-pulse-slow"></i> Emergency Stray Rescue Directory</h3>
+          <p style="font-size: 0.85rem; margin-bottom: 0.75rem; color: var(--text-muted);">If you encounter an animal that is severely injured or trapped in a drain/highway, contact these rescue services immediately:</p>
+          <div class="contacts-grid" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 1rem; font-size: 0.85rem;">
+            <div>📞 <strong>PawRescue Rapid Hotline:</strong> 1-800-555-PAWS (7297)</div>
+            <div>🏥 <strong>Midtown Animal Emergency Hospital:</strong> (555) 019-9911</div>
+            <div>🚚 <strong>Stray Ambulance Transport Service:</strong> (555) 019-8800</div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Donation Section (Hidden by default) -->
+    <section class="app-workspace donate-workspace-panel hidden" id="donate-section">
+      <div class="glass-panel donate-content-card w-full" style="padding: 2rem; max-width: 900px; margin: 0 auto;">
+        <div class="panel-header" style="padding-left: 0; padding-top: 0; margin-bottom: 1.5rem; text-align: center;">
+          <h2><i class="fa-solid fa-hand-holding-heart" style="color: var(--color-urgent);"></i> Support Stray Animal Rescues</h2>
+          <p class="panel-subtitle" style="font-size: 0.85rem;">Your donation pays for veterinary surgery, medical vaccines, and critical food supplies for street strays.</p>
+        </div>
+
+        <div class="donate-flow-grid" style="display: grid; grid-template-columns: 1.2fr 1fr; gap: 2rem;">
+          
+          <!-- Left: Choose amount -->
+          <div class="donation-options-side">
+            <h3 style="font-size: 1rem; margin-bottom: 0.75rem; color: var(--text-main);">1. Select Donation Fund</h3>
+            <div class="donation-tiers" style="display: flex; flex-direction: column; gap: 0.75rem; margin-bottom: 1.25rem;">
+              
+              <div class="tier-card glass-panel active" data-amount="15" data-fund="Kibble & Food Fund" style="padding: 1rem; cursor: pointer; display: flex; align-items: center; justify-content: space-between; border-color: var(--color-primary); background: rgba(245, 158, 11, 0.08);">
+                <div style="display: flex; align-items: center; gap: 0.75rem;">
+                  <span style="font-size: 1.5rem; color: var(--color-primary);"><i class="fa-solid fa-bowl-food"></i></span>
+                  <div style="display: flex; flex-direction: column;">
+                    <strong style="font-size: 0.9rem;">Kibble & Food Fund</strong>
+                    <span style="font-size: 0.75rem; color: var(--text-muted);">Feeds 10 roadside strays for a full week</span>
+                  </div>
+                </div>
+                <span class="tier-price" style="font-size: 1.2rem; font-weight: bold; color: var(--color-primary);">$15</span>
+              </div>
+
+              <div class="tier-card glass-panel" data-amount="35" data-fund="Deworming & Vaccines Fund" style="padding: 1rem; cursor: pointer; display: flex; align-items: center; justify-content: space-between;">
+                <div style="display: flex; align-items: center; gap: 0.75rem;">
+                  <span style="font-size: 1.5rem; color: var(--color-secondary);"><i class="fa-solid fa-syringe"></i></span>
+                  <div style="display: flex; flex-direction: column;">
+                    <strong style="font-size: 0.9rem;">Vaccine & Parasite Treatment</strong>
+                    <span style="font-size: 0.75rem; color: var(--text-muted);">Deworms and immunizes 1 puppy or kitten</span>
+                  </div>
+                </div>
+                <span class="tier-price" style="font-size: 1.2rem; font-weight: bold; color: var(--color-secondary);">$35</span>
+              </div>
+
+              <div class="tier-card glass-panel" data-amount="100" data-fund="Emergency Vet Surgery Fund" style="padding: 1rem; cursor: pointer; display: flex; align-items: center; justify-content: space-between;">
+                <div style="display: flex; align-items: center; gap: 0.75rem;">
+                  <span style="font-size: 1.5rem; color: var(--color-urgent);"><i class="fa-solid fa-house-medical"></i></span>
+                  <div style="display: flex; flex-direction: column;">
+                    <strong style="font-size: 0.9rem;">Emergency Surgery Fund</strong>
+                    <span style="font-size: 0.75rem; color: var(--text-muted);">Covers critical vet surgery and recovery stays</span>
+                  </div>
+                </div>
+                <span class="tier-price" style="font-size: 1.2rem; font-weight: bold; color: var(--color-urgent);">$100</span>
+              </div>
+            </div>
+
+            <!-- Custom Amount input -->
+            <div class="form-group">
+              <label for="custom-donate-amount" style="font-size: 0.85rem; font-weight: 600;">Or enter a custom donation amount ($)</label>
+              <input type="number" id="custom-donate-amount" min="1" placeholder="Enter custom amount..." style="padding: 0.5rem 0.75rem;">
+            </div>
+          </div>
+
+          <!-- Right: Payment checkout form -->
+          <form id="donation-checkout-form" class="checkout-form-side" style="display: flex; flex-direction: column; gap: 0.75rem;">
+            <h3 style="font-size: 1rem; margin-bottom: 0.2rem; color: var(--text-main);">2. Secure Checkout</h3>
+            
+            <div class="form-group">
+              <label for="checkout-name" style="font-size: 0.75rem; font-weight: 700; text-transform: uppercase; color: var(--text-muted);">Cardholder Name</label>
+              <input type="text" id="checkout-name" placeholder="John Doe" required style="padding: 0.4rem 0.6rem;">
+            </div>
+
+            <div class="form-group">
+              <label for="checkout-card" style="font-size: 0.75rem; font-weight: 700; text-transform: uppercase; color: var(--text-muted);">Card Number</label>
+              <input type="text" id="checkout-card" placeholder="4111 2222 3333 4444" maxlength="19" required style="padding: 0.4rem 0.6rem;">
+            </div>
+
+            <div class="coordinates-row" style="grid-template-columns: 1fr 1fr; margin-bottom: 0.5rem;">
+              <div class="input-subgroup">
+                <label for="checkout-expiry" style="font-size: 0.7rem; font-weight: 700; text-transform: uppercase; color: var(--text-muted);">Expiry Date</label>
+                <input type="text" id="checkout-expiry" placeholder="MM/YY" maxlength="5" required style="padding: 0.4rem 0.6rem;">
+              </div>
+              <div class="input-subgroup">
+                <label for="checkout-cvv" style="font-size: 0.7rem; font-weight: 700; text-transform: uppercase; color: var(--text-muted);">CVV Code</label>
+                <input type="password" id="checkout-cvv" placeholder="123" maxlength="3" required style="padding: 0.4rem 0.6rem;">
+              </div>
+            </div>
+
+            <button type="submit" class="btn btn-primary w-full" id="donate-submit-btn" style="padding: 0.75rem; font-size: 1rem; margin-top: 0.5rem;">
+              <i class="fa-solid fa-lock"></i> Donate <span id="donate-btn-amount-text">$15.00</span>
+            </button>
+          </form>
+
+        </div>
+
+        <!-- Success Animation Frame (hidden by default) -->
+        <div id="donation-success-panel" class="donation-success-box hidden" style="text-align: center; padding: 2.5rem 1.5rem; animation: zoom-in 0.3s ease-out;">
+          <div style="font-size: 3.5rem; color: var(--color-rescued); margin-bottom: 1rem;"><i class="fa-solid fa-circle-check animate-bounce-slow"></i></div>
+          <h2 style="color: var(--text-main); margin-bottom: 0.5rem;">Donation Successful!</h2>
+          <p style="font-size: 0.95rem; color: var(--text-muted); max-width: 450px; margin: 0 auto 1.5rem auto;">Thank you so much for your generous gift of <strong id="success-donation-amount" style="color: var(--color-primary);">$15.00</strong> to the <strong id="success-donation-fund">Kibble & Food Fund</strong>. Your contribution saves lives!</p>
+          <button type="button" class="btn btn-secondary" id="success-panel-close-btn">Return to Dashboard</button>
+        </div>
+
+      </div>
+    </section>
+    <!-- Footer -->
+    <footer class="app-footer">
+      <p>&copy; 2026 PawRescue Hub. Built for street animal welfare and rapid rescue coordination.</p>
+    </footer>
+  </div>
+
+  <!-- MODAL: Report Sighting Form -->
+  <div class="modal-overlay hidden" id="report-modal">
+    <div class="modal-card glass-panel">
+      <div class="modal-header">
+        <h2><i class="fa-solid fa-circle-plus"></i> Report Abandoned Roadside Pet</h2>
+        <button type="button" class="close-modal-btn" id="close-report-modal">&times;</button>
+      </div>
+      <form id="sighting-form" class="modal-body">
+        
+        <!-- Toggle Kitten / Puppy -->
+        <div class="form-row">
+          <label class="section-label">1. Animal Type</label>
+          <div class="animal-type-toggle">
+            <input type="radio" id="type-kitten" name="animal-type" value="kitten" checked required>
+            <label for="type-kitten" class="toggle-card">
+              <i class="fa-solid fa-cat icon-lg"></i>
+              <span>Kitten / Cat</span>
+            </label>
+            
+            <input type="radio" id="type-puppy" name="animal-type" value="puppy" required>
+            <label for="type-puppy" class="toggle-card">
+              <i class="fa-solid fa-dog icon-lg"></i>
+              <span>Puppy / Dog</span>
+            </label>
+          </div>
+        </div>
+
+        <!-- Urgency Level -->
+        <div class="form-group">
+          <label for="sighting-urgency">2. Urgency Status</label>
+          <select id="sighting-urgency" required>
+            <option value="urgent" selected>Urgent (Injured, Sick, Danger of Traffic)</option>
+            <option value="normal">Normal (Healthy but stranded, needs food/shelter)</option>
+            <option value="safe">Monitored (Fed, temp sheltered, but needs permanent home)</option>
+          </select>
+        </div>
+
+        <!-- Location: Map Picker & Coordinate inputs -->
+        <div class="form-group">
+          <label>3. Pin Sighting Location</label>
+          <p class="form-help-text">Click on the mini map below to mark the exact spot where the animal is located.</p>
+          <div id="modal-map-picker" class="modal-mini-map"></div>
+          
+          <div class="coordinates-row">
+            <div class="input-subgroup">
+              <label for="input-latitude">Latitude</label>
+              <input type="number" step="any" id="input-latitude" placeholder="e.g. 12.9716" required readonly>
+            </div>
+            <div class="input-subgroup">
+              <label for="input-longitude">Longitude</label>
+              <input type="number" step="any" id="input-longitude" placeholder="e.g. 77.5946" required readonly>
+            </div>
+            <button type="button" class="btn btn-sm btn-outline" id="use-gps-btn">
+              <i class="fa-solid fa-location-crosshairs"></i> Use My GPS
+            </button>
+          </div>
+        </div>
+
+        <!-- Landmark/Roadside Address description -->
+        <div class="form-group">
+          <label for="sighting-address">4. Road/Landmark Description</label>
+          <input type="text" id="sighting-address" placeholder="e.g. Near Blue Coffee Shop, opposite Green Park Main Gate" required>
+        </div>
+
+        <!-- Image Upload (Drag & Drop + Input) -->
+        <div class="form-group">
+          <label>5. Upload Sighting Photo</label>
+          <div class="image-drag-drop" id="image-drag-container">
+            <i class="fa-regular fa-image icon-xl"></i>
+            <p>Drag and drop a photo here, or <span>browse files</span></p>
+            <input type="file" id="image-file-input" accept="image/*" class="hidden-input">
+            <div class="image-preview-container hidden" id="image-preview-box">
+              <img id="image-preview-element" src="" alt="Preview">
+              <button type="button" class="remove-image-btn" id="remove-preview-btn">&times;</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Detailed Description -->
+        <div class="form-group">
+          <label for="sighting-description">6. Condition Details & Description</label>
+          <textarea id="sighting-description" rows="3" placeholder="Provide extra details: Are they hiding? Is there traffic? What is their health? Can they walk?" required></textarea>
+        </div>
+
+        <!-- Contact Info -->
+        <div class="form-group">
+          <label for="sighting-contact">7. Your Contact Info (Optional)</label>
+          <input type="text" id="sighting-contact" placeholder="e.g. Alex (Phone: 555-0199)">
+        </div>
+
+        <!-- Action Buttons -->
+        <div class="modal-footer">
+          <button type="button" class="btn btn-outline" id="cancel-report-btn">Cancel</button>
+          <button type="submit" class="btn btn-primary">Submit Alert</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- MODAL: Sighting Detail View -->
+  <div class="modal-overlay hidden" id="detail-modal">
+    <div class="modal-card glass-panel modal-wide">
+      <div class="modal-header">
+        <h2 id="detail-title"><span class="badge badge-urgent">Kitten</span> Roadside Sighting</h2>
+        <button type="button" class="close-modal-btn" id="close-detail-modal">&times;</button>
+      </div>
+      <div class="modal-body detail-grid">
+        <!-- Left Side: Image & Description -->
+        <div class="detail-content">
+          <div class="detail-image-box">
+            <img id="detail-img" src="" alt="Sighting Image">
+            <span class="urgency-banner" id="detail-urgency-banner">URGENT HELP NEEDED</span>
+          </div>
+          
+          <div class="detail-photo-updater" style="margin-top: -0.5rem; margin-bottom: 0.5rem;">
+            <button type="button" class="btn btn-sm btn-outline w-full" id="trigger-photo-update-btn">
+              <i class="fa-solid fa-camera"></i> Update Sighting Photo
+            </button>
+            <input type="file" id="detail-photo-input" accept="image/*" class="hidden">
+          </div>
+          
+          <div class="detail-description-section">
+            <h4>Description & Condition</h4>
+            <p id="detail-description-text">Loading details...</p>
+            
+            <div class="detail-metadata">
+              <div class="meta-item">
+                <span class="meta-label">Reported by:</span>
+                <span class="meta-val" id="detail-contact-text">Anonymous</span>
+              </div>
+              <div class="meta-item">
+                <span class="meta-label">Date/Time:</span>
+                <span class="meta-val" id="detail-time-text">Just now</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Right Side: Map location & updates -->
+        <div class="detail-sidebar">
+          <div class="detail-location-section">
+            <h4>Location & Coordinates</h4>
+            <div class="detail-address-badge">
+              <i class="fa-solid fa-location-dot"></i>
+              <span id="detail-address-text">Opposite city library</span>
+            </div>
+            
+            <div id="modal-detail-map" class="modal-mini-map"></div>
+            
+            <div class="directions-actions">
+              <a href="" id="detail-gmaps-link" target="_blank" class="btn btn-sm btn-outline w-full">
+                <i class="fa-solid fa-map"></i> Open in Google Maps
+              </a>
+            </div>
+          </div>
+
+          <!-- Nearest Volunteers Panel -->
+          <div class="detail-nearby-volunteers-box">
+            <h4>Nearest Available Volunteers</h4>
+            <p class="form-help-text" style="font-size:10px; color:var(--text-muted); margin-bottom:0.4rem;">Coordinate adoption or transport with nearby online volunteers.</p>
+            <div class="nearby-volunteers-list" id="detail-nearby-volunteers-container" style="display:flex; flex-direction:column; gap:0.4rem; max-height:120px; overflow-y:auto; padding-right:4px;">
+              <!-- Dynamically rendered nearby volunteers -->
+            </div>
+          </div>
+
+          <!-- Sighting Status Updater -->
+          <div class="detail-status-box">
+            <h4>Update Sighting Status</h4>
+            <div class="status-updater-row">
+              <select id="update-sighting-status-select">
+                <option value="urgent">Urgent Sighting</option>
+                <option value="normal">Active Sighting (Needs Rescue)</option>
+                <option value="safe">Monitored / Fed</option>
+                <option value="rescued">Rescued & Safe! (Close Report)</option>
+              </select>
+              <button type="button" class="btn btn-sm btn-primary" id="save-status-btn">Update</button>
+            </div>
+          </div>
+
+          <!-- Allocation & Relocation Panel -->
+          <div class="detail-allocation-box">
+            <h4>Allocate Responder & Relocation</h4>
+            <div class="allocation-row">
+              <select id="allocate-responder-select">
+                <option value="unassigned">Unassigned (Needs Responder)</option>
+                <option value="paws-patrol">Paws Patrol Squad</option>
+                <option value="hope-shelter">Hope Animal Shelter</option>
+                <option value="vet-clinic">Downtown Vet Clinic</option>
+                <option value="self">Claim Case (You)</option>
+              </select>
+              <button type="button" class="btn btn-sm btn-outline" id="save-allocation-btn">Assign</button>
+            </div>
+
+            <!-- Relocate controls -->
+            <div class="relocate-action-container">
+              <button type="button" class="btn btn-sm btn-outline w-full" id="toggle-relocation-mode-btn">
+                <i class="fa-solid fa-map-pin"></i> Relocate Animal
+              </button>
+              
+              <div id="relocation-input-panel" class="relocation-form hidden">
+                <p class="form-help-text">Click on the map above to select the new location, then enter the new address description below.</p>
+                <input type="text" id="relocate-address-input" placeholder="New address / landmark...">
+                <div class="relocation-coords">
+                  <span>Lat: <strong id="relocate-lat-text">-</strong></span>
+                  <span>Lng: <strong id="relocate-lng-text">-</strong></span>
+                </div>
+                <div class="relocation-actions-row">
+                  <button type="button" class="btn btn-sm btn-primary" id="submit-relocation-btn">Save Location</button>
+                  <button type="button" class="btn btn-sm btn-outline" id="cancel-relocation-btn">Cancel</button>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Local Comments/Updates for this report -->
+          <div class="detail-comments-section">
+            <h4>Sighting Updates & Comments</h4>
+            <div class="detail-comments-list" id="detail-comments-container">
+              <!-- Dynamic comments show here -->
+            </div>
+            <form class="detail-comment-form" id="detail-comment-submit-form">
+              <input type="text" id="detail-comment-input" placeholder="Add an update (e.g. 'Brought food')..." required>
+              <button type="submit" class="btn btn-sm btn-primary"><i class="fa-solid fa-plus"></i></button>
+            </form>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL: Private DM Chat -->
+  <div class="modal-overlay hidden" id="private-chat-modal">
+    <div class="modal-card glass-panel" style="max-width: 460px; height: 500px; display: flex; flex-direction: column;">
+      <div class="modal-header">
+        <h2 id="private-chat-title"><i class="fa-solid fa-comments"></i> Direct Message</h2>
+        <button type="button" class="close-modal-btn" id="close-private-chat-modal">&times;</button>
+      </div>
+      <div class="modal-body" style="flex: 1; overflow: hidden; display: flex; flex-direction: column; padding: 1rem; gap: 0.75rem;">
+        <!-- Conversation partner status info -->
+        <div id="private-chat-status-bar" style="font-size: 11px; padding: 0.4rem; background: var(--bg-primary); border-radius: var(--radius-sm); border: 1px solid var(--border-color); display: flex; align-items: center; gap: 0.4rem; font-weight: bold; color: var(--color-rescued);">
+          <span class="online-indicator"></span>
+          <span id="private-status-text">Connecting to volunteer...</span>
+        </div>
+        
+        <div class="chat-messages-container" id="private-messages-box" style="flex: 1; overflow-y: auto; border: 1px solid var(--border-color); border-radius: var(--radius-md); padding: 0.75rem; background-color: var(--bg-primary); display: flex; flex-direction: column; gap: 0.5rem;">
+          <!-- Private messages dynamic -->
+        </div>
+        
+        <form class="chat-input-bar" id="private-send-form" style="padding: 0; border: none;">
+          <input type="text" id="private-chat-input" placeholder="Type a message to coordinate adoption..." autocomplete="off" required style="padding: 0.5rem 0.75rem;">
+          <button type="submit" class="chat-send-btn" style="width: 34px; height: 34px;">
+            <i class="fa-solid fa-paper-plane" style="font-size: 0.8rem;"></i>
+          </button>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL: Volunteer Profile / Authentication -->
+  <div class="modal-overlay hidden" id="profile-modal">
+    <div class="modal-card glass-panel" style="max-width: 500px;">
+      <div class="modal-header">
+        <h2 id="profile-modal-title"><i class="fa-solid fa-user-circle"></i> Volunteer Profile</h2>
+        <button type="button" class="close-modal-btn" id="close-profile-modal">&times;</button>
+      </div>
+      <div class="modal-body" style="padding: 1.5rem;">
+        
+        <!-- STATE A: Logged Out (Auth forms) -->
+        <div id="profile-logged-out-state" class="hidden">
+          <div class="auth-tabs" style="display:flex; justify-content:center; gap:1.5rem; margin-bottom:1.5rem; border-bottom:1px solid var(--border-color); padding-bottom:0.5rem;">
+            <button type="button" class="auth-tab-btn active" id="auth-tab-signin" style="background:none; border:none; color:var(--color-primary); font-weight:bold; cursor:pointer;">Sign In</button>
+            <button type="button" class="auth-tab-btn" id="auth-tab-signup" style="background:none; border:none; color:var(--text-muted); font-weight:bold; cursor:pointer;">Register</button>
+          </div>
+          
+          <!-- Sign In Form -->
+          <form id="signin-form" style="display:flex; flex-direction:column; gap:0.75rem;">
+            <div class="form-group">
+              <label for="signin-email">Email Address</label>
+              <input type="email" id="signin-email" placeholder="you@example.com" required style="padding:0.5rem; font-size:0.85rem;">
+            </div>
+            <div class="form-group">
+              <label for="signin-password">Password</label>
+              <input type="password" id="signin-password" placeholder="••••••••" required style="padding:0.5rem; font-size:0.85rem;">
+            </div>
+            <button type="submit" class="btn btn-primary w-full" style="padding:0.6rem; margin-top:0.5rem;">Sign In</button>
+          </form>
+
+          <!-- Register Form (hidden initially) -->
+          <form id="signup-form" class="hidden" style="display:flex; flex-direction:column; gap:0.75rem;">
+            <div class="form-group">
+              <label for="signup-nickname">Volunteer Nickname</label>
+              <input type="text" id="signup-nickname" placeholder="RescueHero" required style="padding:0.5rem; font-size:0.85rem;">
+            </div>
+            <div class="form-group">
+              <label for="signup-email">Email Address</label>
+              <input type="email" id="signup-email" placeholder="you@example.com" required style="padding:0.5rem; font-size:0.85rem;">
+            </div>
+            <div class="form-group">
+              <label for="signup-password">Password</label>
+              <input type="password" id="signup-password" placeholder="Min 6 characters" required style="padding:0.5rem; font-size:0.85rem;">
+            </div>
+            <button type="submit" class="btn btn-primary w-full" style="padding:0.6rem; margin-top:0.5rem;">Create Account</button>
+          </form>
+          
+          <div style="text-align:center; margin-top:1.25rem;">
+            <span style="font-size:11px; color:var(--text-muted);">Quick entry?</span>
+            <button type="button" id="quick-guest-login-btn" style="background:none; border:none; color:var(--color-secondary); font-weight:bold; cursor:pointer; font-size:11px; text-decoration:underline;">Continue as Guest</button>
+          </div>
+        </div>
+
+        <!-- STATE B: Logged In (Profile View) -->
+        <div id="profile-logged-in-state">
+          <div style="display:flex; flex-direction:column; align-items:center; gap:0.5rem; margin-bottom:1.5rem;">
+            <div style="position:relative;">
+              <img id="profile-view-avatar" src="" alt="Avatar" style="width:76px; height:76px; border-radius:50%; border:3px solid var(--color-primary); background-color:var(--bg-primary); padding:2px;">
+              <span id="profile-rank-badge" style="position:absolute; bottom:-6px; right:-6px; font-size:9px; background:linear-gradient(135deg, gold, darkorange); color:black; padding:2px 6px; border-radius:10px; font-weight:bold; border:1px solid white;">GOLD</span>
+            </div>
+            <h3 id="profile-view-username" style="font-size:1.2rem; margin-top:0.4rem; color:var(--text-main);">Volunteer</h3>
+            <span id="profile-view-role" style="font-size:0.7rem; color:var(--text-muted); font-weight:bold; text-transform:uppercase;">Senior Rescuer</span>
+          </div>
+
+          <!-- Stats Dashboard Cards Grid -->
+          <div style="display:grid; grid-template-columns: repeat(3, 1fr); gap:0.75rem; margin-bottom:1.5rem;">
+            <div style="text-align:center; background:var(--bg-secondary); border:1px solid var(--border-color); padding:0.6rem; border-radius:var(--radius-md);">
+              <span id="stat-profile-reported" style="font-size:1.15rem; font-weight:bold; color:var(--color-secondary);">0</span>
+              <div style="font-size:8px; color:var(--text-muted); text-transform:uppercase; font-weight:bold;">Reported</div>
+            </div>
+            <div style="text-align:center; background:var(--bg-secondary); border:1px solid var(--border-color); padding:0.6rem; border-radius:var(--radius-md);">
+              <span id="stat-profile-rescues" style="font-size:1.15rem; font-weight:bold; color:var(--color-urgent);">0</span>
+              <div style="font-size:8px; color:var(--text-muted); text-transform:uppercase; font-weight:bold;">Rescued</div>
+            </div>
+            <div style="text-align:center; background:var(--bg-secondary); border:1px solid var(--border-color); padding:0.6rem; border-radius:var(--radius-md);">
+              <span id="stat-profile-donated" style="font-size:1.15rem; font-weight:bold; color:var(--color-rescued);">$0</span>
+              <div style="font-size:8px; color:var(--text-muted); text-transform:uppercase; font-weight:bold;">Donated</div>
+            </div>
+          </div>
+
+          <div style="display:flex; flex-direction:column; gap:0.75rem; margin-bottom:1.5rem;">
+            <div class="form-group">
+              <label for="profile-edit-username" style="font-size:0.75rem; font-weight:700; text-transform:uppercase; color:var(--text-muted);">Change Nickname</label>
+              <input type="text" id="profile-edit-username" style="padding:0.4rem 0.6rem; font-size:0.85rem;">
+            </div>
+            
+            <div class="avatar-selector">
+              <label style="font-size:0.75rem; font-weight:700; text-transform:uppercase; color:var(--text-muted);">Select New Avatar</label>
+              <div class="avatar-options" id="profile-avatar-options-box" style="display:flex; gap:0.4rem; margin-top:0.25rem;">
+                <img class="avatar-option" data-seed="RescueHero" src="https://api.dicebear.com/7.x/bottts/svg?seed=RescueHero" alt="Avatar">
+                <img class="avatar-option" data-seed="PawsLover" src="https://api.dicebear.com/7.x/bottts/svg?seed=PawsLover" alt="Avatar">
+                <img class="avatar-option" data-seed="CatSaver" src="https://api.dicebear.com/7.x/bottts/svg?seed=CatSaver" alt="Avatar">
+                <img class="avatar-option" data-seed="DogWalker" src="https://api.dicebear.com/7.x/bottts/svg?seed=DogWalker" alt="Avatar">
+                <img class="avatar-option" data-seed="StreetAngel" src="https://api.dicebear.com/7.x/bottts/svg?seed=StreetAngel" alt="Avatar">
+              </div>
+            </div>
+          </div>
+
+          <div class="modal-footer" style="padding-top:0.5rem; border-top:1px solid var(--border-color); display:flex; justify-content:space-between; width:100%;">
+            <button type="button" class="btn btn-outline" id="profile-logout-btn" style="color:var(--color-urgent); border-color:var(--color-urgent); padding:0.4rem 0.8rem; font-size:0.8rem;"><i class="fa-solid fa-right-from-bracket"></i> Log Out</button>
+            <div style="display:flex; gap:0.5rem;">
+              <button type="button" class="btn btn-outline btn-sm" id="profile-modal-cancel-btn">Close</button>
+              <button type="button" class="btn btn-primary btn-sm" id="profile-modal-save-btn">Save Changes</button>
+            </div>
+          </div>
+        </div>
+
+      </div>
+    </div>
+  </div>
+
+  <!-- Leaflet Map JS -->
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+  <!-- Local Application Script -->
+  <script src="app.js"></script>
+</body>
+</html>
