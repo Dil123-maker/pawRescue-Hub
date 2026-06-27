@@ -166,6 +166,11 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // Attach event listeners
   setupEventListeners();
+
+  // Initialize Firebase real-time listeners if connected
+  if (db) {
+    initFirebaseSync();
+  }
   
   // Setup real-time simulation bot
   startVolunteerBotInterval();
@@ -940,17 +945,8 @@ function handleReportFormSubmit(e) {
     comments: []
   };
 
-  // Prepend to array
-  state.sightings.unshift(newSighting);
-  localStorage.setItem('pawrescue_sightings', JSON.stringify(state.sightings));
-
-  // Render & Update UI
-  renderSightingGrid();
-  refreshMapMarkers();
-  updateDashboardStats();
-
-  // Broadcast to other tabs
-  sightingChannel.postMessage({ type: 'NEW_SIGHTING', sighting: newSighting });
+  // Save Sighting (Firebase database sync or Local fallback)
+  saveSightingToDB(newSighting, true);
 
   // Share inside the public chat automatically to coordinate help
   sendSightingShareMessage(newSighting);
@@ -991,21 +987,14 @@ function handleDetailStatusUpdate() {
       time: new Date().toISOString()
     });
 
-    localStorage.setItem('pawrescue_sightings', JSON.stringify(state.sightings));
+    // Save Sighting (Firebase database sync or Local fallback)
+    saveSightingToDB(sighting);
     
-    // Rerender UI details
-    renderSightingGrid();
-    refreshMapMarkers();
-    updateDashboardStats();
-    renderDetailComments(sighting.comments);
-    
-    // Sync status banner
+    // Local details view update for instant visual feedback
     const detailUrgencyBanner = document.getElementById('detail-urgency-banner');
     detailUrgencyBanner.innerText = `${newStatus.toUpperCase()} STATUS`;
     detailUrgencyBanner.style.backgroundColor = `var(--color-${newStatus})`;
-
-    // Broadcast status change
-    sightingChannel.postMessage({ type: 'SIGHTING_UPDATE', sighting: sighting });
+    renderDetailComments(sighting.comments);
 
     // Send system message in public chat
     sendPublicChatSystemMsg(`${state.currentUser.username} updated the status of the sighting in "${sighting.address}" to "${newStatus.toUpperCase()}".`);
@@ -1030,13 +1019,10 @@ function handleDetailCommentSubmit(e) {
     };
 
     sighting.comments.push(newComment);
-    localStorage.setItem('pawrescue_sightings', JSON.stringify(state.sightings));
-
+    saveSightingToDB(sighting);
+    
     renderDetailComments(sighting.comments);
     input.value = '';
-
-    // Broadcast comment update
-    sightingChannel.postMessage({ type: 'SIGHTING_UPDATE', sighting: sighting });
   }
 }
 
@@ -1059,14 +1045,8 @@ function handleChatSubmit(e) {
     isSystem: false
   };
 
-  state.chats.push(newMsg);
-  localStorage.setItem('pawrescue_chats', JSON.stringify(state.chats));
-  
-  renderChatMessages();
+  saveChatMessageToDB(newMsg);
   input.value = '';
-
-  // Sync via BroadcastChannel
-  chatChannel.postMessage({ type: 'CHAT_MSG', data: newMsg });
 }
 
 function sendSightingShareMessage(sighting) {
@@ -1080,11 +1060,7 @@ function sendSightingShareMessage(sighting) {
     isSystem: false
   };
 
-  state.chats.push(chatMsg);
-  localStorage.setItem('pawrescue_chats', JSON.stringify(state.chats));
-  renderChatMessages();
-
-  chatChannel.postMessage({ type: 'CHAT_MSG', data: chatMsg });
+  saveChatMessageToDB(chatMsg);
 }
 
 function sendPublicChatSystemMsg(text) {
@@ -1095,11 +1071,7 @@ function sendPublicChatSystemMsg(text) {
     isSystem: true
   };
 
-  state.chats.push(sysMsg);
-  localStorage.setItem('pawrescue_chats', JSON.stringify(state.chats));
-  renderChatMessages();
-  
-  chatChannel.postMessage({ type: 'CHAT_MSG', data: sysMsg });
+  saveChatMessageToDB(sysMsg);
 }
 
 // ----------------------------------------------------
@@ -1900,6 +1872,9 @@ window.openPrivateChat = function(partnerUsername) {
   document.getElementById('private-chat-title').innerHTML = `<i class="fa-solid fa-comments"></i> Chat with ${partnerUsername}`;
   document.getElementById('private-status-text').innerText = `Active Volunteer (Online)`;
   
+  // Bind Firebase real-time DMs listener if connected
+  listenToPrivateMessages(partnerUsername);
+  
   renderPrivateMessages();
   
   document.getElementById('private-chat-modal').classList.remove('hidden');
@@ -1969,17 +1944,8 @@ function handlePrivateChatSubmit(e) {
     time: new Date().toISOString()
   };
 
-  if (!state.privateChats[partner]) {
-    state.privateChats[partner] = [];
-  }
-  state.privateChats[partner].push(newMsg);
-  localStorage.setItem('pawrescue_private_chats', JSON.stringify(state.privateChats));
-
-  renderPrivateMessages();
+  savePrivateMessageToDB(newMsg, partner);
   input.value = '';
-
-  // Broadcast
-  chatChannel.postMessage({ type: 'PRIVATE_MSG', data: newMsg });
 
   // Bot response check
   if (['StreetAngel', 'VetSarah', 'DoggoSaver', 'KittenWhisperer', 'PawsPatrol'].includes(partner)) {
@@ -2013,17 +1979,7 @@ function triggerBotPrivateReply(botName, userMsg) {
       time: new Date().toISOString()
     };
 
-    if (!state.privateChats[botName]) {
-      state.privateChats[botName] = [];
-    }
-    state.privateChats[botName].push(botReply);
-    localStorage.setItem('pawrescue_private_chats', JSON.stringify(state.privateChats));
-
-    if (state.currentChatPartner === botName) {
-      renderPrivateMessages();
-    }
-
-    chatChannel.postMessage({ type: 'PRIVATE_MSG', data: botReply });
+    savePrivateMessageToDB(botReply, botName);
   }, 2200);
 }
 
@@ -2085,10 +2041,7 @@ function awardHeroRescue(heroUsername) {
     });
   }
 
-  localStorage.setItem('pawrescue_heroes', JSON.stringify(state.heroes));
-  renderRescueHeroes();
-
-  chatChannel.postMessage({ type: 'HEROES_UPDATE', data: state.heroes });
+  saveHeroesToDB(state.heroes);
 
   sendPublicChatSystemMsg(`🏆 HERO ALERT: ${heroUsername} successfully rescued a roadside animal and became a Rescue Hero! (Total: ${state.heroes.find(h => h.username === heroUsername).rescuesCount} rescues) 🏆`);
 }
@@ -2353,6 +2306,153 @@ function resetDonationSectionToDashboard() {
   tabs.forEach(t => t.classList.remove('active'));
   tabs[0].classList.add('active');
   switchNavigationTab('dashboard');
+}
+
+// ----------------------------------------------------
+// Firebase Sync Declarations & Helpers
+// ----------------------------------------------------
+let db = null;
+const firebaseConfig = {
+  databaseURL: "https://pawrescue-hub-default-rtdb.firebaseio.com"
+};
+
+if (typeof firebase !== 'undefined') {
+  try {
+    firebase.initializeApp(firebaseConfig);
+    db = firebase.database();
+    console.log("Firebase connected successfully!");
+  } catch (err) {
+    console.error("Firebase init failed:", err);
+  }
+}
+
+function initFirebaseSync() {
+  if (!db) return;
+
+  // 1. Sync Sightings
+  db.ref('sightings').on('value', (snapshot) => {
+    const data = snapshot.val();
+    if (data) {
+      const list = Object.keys(data).map(key => data[key]);
+      state.sightings = list;
+      
+      state.sightings.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
+      
+      renderSightingGrid();
+      refreshMapMarkers();
+      updateDashboardStats();
+      
+      if (state.currentDetailId) {
+        const sig = state.sightings.find(s => s.id === state.currentDetailId);
+        if (sig) {
+          renderDetailComments(sig.comments);
+          renderNearestVolunteers(sig);
+        }
+      }
+    }
+  });
+
+  // 2. Sync Chat Feed
+  db.ref('chats').limitToLast(50).on('child_added', (snapshot) => {
+    const msg = snapshot.val();
+    if (msg && msg.id) {
+      if (!state.chats.some(c => c.id === msg.id)) {
+        state.chats.push(msg);
+        renderChatMessages();
+      }
+    }
+  });
+
+  // 3. Sync Heroes Scoreboard
+  db.ref('heroes').on('value', (snapshot) => {
+    const data = snapshot.val();
+    if (data) {
+      state.heroes = data;
+      renderRescueHeroes();
+    }
+  });
+}
+
+function saveSightingToDB(sighting, isNew = false) {
+  if (db) {
+    db.ref('sightings/' + sighting.id).set(sighting);
+  } else {
+    if (isNew) {
+      state.sightings.unshift(sighting);
+    } else {
+      const idx = state.sightings.findIndex(s => s.id === sighting.id);
+      if (idx !== -1) state.sightings[idx] = sighting;
+    }
+    localStorage.setItem('pawrescue_sightings', JSON.stringify(state.sightings));
+    
+    renderSightingGrid();
+    refreshMapMarkers();
+    updateDashboardStats();
+    
+    if (state.currentDetailId === sighting.id) {
+      renderDetailComments(sighting.comments);
+      renderNearestVolunteers(sighting);
+    }
+    
+    sightingChannel.postMessage({ type: 'SIGHTING_UPDATE', sighting: sighting });
+  }
+}
+
+function saveChatMessageToDB(msg) {
+  if (db) {
+    db.ref('chats').push(msg);
+  } else {
+    state.chats.push(msg);
+    localStorage.setItem('pawrescue_chats', JSON.stringify(state.chats));
+    renderChatMessages();
+    chatChannel.postMessage({ type: 'CHAT_MSG', data: msg });
+  }
+}
+
+function saveHeroesToDB(heroesList) {
+  if (db) {
+    db.ref('heroes').set(heroesList);
+  } else {
+    localStorage.setItem('pawrescue_heroes', JSON.stringify(state.heroes));
+    renderRescueHeroes();
+    chatChannel.postMessage({ type: 'HEROES_UPDATE', data: state.heroes });
+  }
+}
+
+function savePrivateMessageToDB(msg, partner) {
+  if (db) {
+    const convId = [state.currentUser.username, partner].sort().join('_');
+    db.ref('privateChats/' + convId).push(msg);
+  } else {
+    if (!state.privateChats[partner]) {
+      state.privateChats[partner] = [];
+    }
+    state.privateChats[partner].push(msg);
+    localStorage.setItem('pawrescue_private_chats', JSON.stringify(state.privateChats));
+    renderPrivateMessages();
+    chatChannel.postMessage({ type: 'PRIVATE_MSG', data: msg });
+  }
+}
+
+function listenToPrivateMessages(partner) {
+  if (!db || !partner) return;
+  const convId = [state.currentUser.username, partner].sort().join('_');
+  
+  db.ref('privateChats/' + convId).off();
+  db.ref('privateChats/' + convId).on('child_added', (snapshot) => {
+    const msg = snapshot.val();
+    if (msg && msg.id) {
+      if (!state.privateChats[partner]) {
+        state.privateChats[partner] = [];
+      }
+      if (!state.privateChats[partner].some(m => m.id === msg.id)) {
+        state.privateChats[partner].push(msg);
+        if (state.currentChatPartner === partner) {
+          renderPrivateMessages();
+        }
+      }
+    }
+  });
 }
 
 
